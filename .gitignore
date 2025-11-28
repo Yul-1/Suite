@@ -4,7 +4,11 @@
 *.json
 
 # Output directory - ignore all contents but keep structure
-output/*
-!output/.gitkeep
-output/*/
-!output/*/.gitkeep
+output/analysis/*
+!output/analysis/.gitkeep
+output/data_input/*
+!output/data_input/.gitkeep
+output/report/*
+!output/report/.gitkeep
+output/results/*
+!output/results/.gitkeep
