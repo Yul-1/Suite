@@ -2,3 +2,9 @@
 *.xml
 *.csv
 *.json
+
+# Output directory - ignore all contents but keep structure
+output/*
+!output/.gitkeep
+output/*/
+!output/*/.gitkeep
