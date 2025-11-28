@@ -38,15 +38,11 @@ env/
 .DS_Store
 
 # Output and temporary files
-output/
 *.log
 *.tmp
 *.temp
 
 # Analysis results
-analysis/*.json
-analysis/*.xml
-analysis/*.html
 
 # Configuration (uncomment if you want to ignore config files)
 config/*.conf
