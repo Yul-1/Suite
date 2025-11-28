@@ -1,0 +1,19 @@
+# IP Lists for Vulnerability Assessment
+# One IP/range per line
+# Supported formats:
+#   - Single IP: 192.168.1.1
+#   - IP range: 192.168.1.1-192.168.1.50
+#   - CIDR: 10.0.0.0/24
+
+# Example IP ranges (modify according to your network)
+109.168.119.0
+109.168.119.1
+109.168.119.2
+109.168.119.3
+109.168.119.4
+109.168.119.5
+109.168.119.6
+109.168.119.7
+109.168.119.8
+109.168.119.9
+109.168.119.10

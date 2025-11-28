@@ -1,0 +1,9 @@
+# Vulnerability Assessment Suite - Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# Core dependencies
+# (None required - scripts use Python standard library only)
+
+# Optional dependencies for extended functionality
+# pandas>=2.0.0  # For advanced CSV manipulation
+# numpy>=1.24.0  # For statistical analysis
