@@ -113,18 +113,18 @@ webserver.company.com
 
 **Scan base (veloce):**
 ```bash
-nmap -sV -sC -oX /tmp/nmap_scan.xml -iL input/ip_lists.txt
+nmap -sV -sC -oX input/nmap/nmap_scan.xml -iL input/ip_lists.txt
 ```
 
 **Scan completo (più lento ma dettagliato):**
 ```bash
-nmap -A -p- -oX /tmp/nmap_full_scan.xml -iL input/ip_lists.txt
+nmap -A -p- -oX input/nmap/nmap_full_scan.xml -iL input/ip_lists.txt
 ```
 
 **Scan per subnet specifiche:**
 ```bash
-nmap -sV -oX /tmp/nmap_subnet1.xml 192.168.1.0/24
-nmap -sV -oX /tmp/nmap_subnet2.xml 10.0.0.0/24
+nmap -sV -oX input/nmap/nmap_subnet1.xml 192.168.1.0/24
+nmap -sV -oX input/nmap/nmap_subnet2.xml 10.0.0.0/24
 ```
 
 **Opzioni Nmap consigliate:**
@@ -135,7 +135,7 @@ nmap -sV -oX /tmp/nmap_subnet2.xml 10.0.0.0/24
 - `-oX`: Output XML (richiesto!)
 - `-iL`: Input da file
 
-**Output atteso:** File XML in `/tmp/` o directory a scelta
+**Output atteso:** File XML in `input/nmap/` o directory a scelta
 
 ### 3.3 Eseguire Greenbone/OpenVAS Scan
 
@@ -165,9 +165,9 @@ nmap -sV -oX /tmp/nmap_subnet2.xml 10.0.0.0/24
 5. **Esportare Risultati**
    - Click su task completata
    - Export → CSV Results
-   - Salvare come `/tmp/greenbone_scan.csv`
+   - Salvare come `input/greenbone/greenbone_scan.csv`
 
-**Output atteso:** File CSV in `/tmp/`
+**Output atteso:** File CSV in `input/greenbone/`
 
 ---
 
@@ -514,8 +514,8 @@ python3 scripts/collection/01_nmap_unifier.py
 python3 scripts/collection/02_greenbone_unifier.py
 
 # Verificare file input non corrotti
-file /tmp/nmap_scan.xml
-file /tmp/greenbone_scan.csv
+file input/nmap/nmap_scan.xml
+file input/greenbone/greenbone_scan.csv
 ```
 
 ### 8.4 Problema: "Permission denied"
