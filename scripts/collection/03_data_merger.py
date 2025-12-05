@@ -3,59 +3,98 @@
 Data Merger for Vulnerability Assessment Project
 Combines Nmap and Greenbone scan results into unified dataset
 
-Author: AI Assistant
-Version: 1.0
+Optimized for security, performance, and data integrity
+Author: AI Assistant & Security Optimizer
+Version: 2.0
 """
 
 import json
 import csv
 import sys
 import os
+import re
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Set, Tuple
+from pathlib import Path
 import logging
 
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(levelname)s] %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 class DataMerger:
     def __init__(self, results_dir: str = "output/results"):
-        self.results_dir = results_dir
-        self.nmap_file = os.path.join(results_dir, "nmap_unified.json")
-        self.greenbone_file = os.path.join(results_dir, "greenbone_unified.json")
-        self.output_json = os.path.join(results_dir, "master_data.json")
-        self.output_csv = os.path.join(results_dir, "master_data.csv")
+        self.results_dir = self._validate_directory(results_dir)
+        self.nmap_file = os.path.join(self.results_dir, "nmap_unified.json")
+        self.greenbone_file = os.path.join(self.results_dir, "greenbone_unified.json")
+        self.output_json = os.path.join(self.results_dir, "master_data.json")
+        self.output_csv = os.path.join(self.results_dir, "master_data.csv")
 
-    def load_data(self) -> tuple:
+    @staticmethod
+    def _validate_directory(dir_path: str) -> str:
+        """Validate and sanitize directory path to prevent path traversal attacks"""
+        clean_path = os.path.normpath(dir_path)
+        if '..' in clean_path or clean_path.startswith('/etc') or clean_path.startswith('/sys'):
+            raise ValueError(f"Invalid directory path: {dir_path}")
+        return clean_path
+
+    @staticmethod
+    def _validate_ip(ip: str) -> bool:
+        """Validate IP address format (IPv4 and IPv6)"""
+        ipv4_pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
+        ipv6_pattern = r'^([0-9a-fA-F]{0,4}:){7}[0-9a-fA-F]{0,4}$'
+
+        if re.match(ipv4_pattern, ip):
+            octets = [int(x) for x in ip.split('.')]
+            return all(0 <= octet <= 255 for octet in octets)
+        return bool(re.match(ipv6_pattern, ip))
+
+    def load_data(self) -> Tuple[Optional[Dict], Optional[Dict]]:
         """Load and validate both Nmap and Greenbone data files"""
         logger.info("Loading Nmap and Greenbone data files...")
 
-        # Load Nmap data
-        try:
-            with open(self.nmap_file, 'r', encoding='utf-8') as f:
-                nmap_data = json.load(f)
-            logger.info(f"Loaded Nmap data: {len(nmap_data.get('hosts', []))} hosts")
-        except FileNotFoundError:
-            logger.error(f"Nmap file not found: {self.nmap_file}")
-            return None, None
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in Nmap file: {e}")
+        nmap_data = self._load_json_file(self.nmap_file, "Nmap")
+        greenbone_data = self._load_json_file(self.greenbone_file, "Greenbone")
+
+        if not nmap_data or not greenbone_data:
             return None, None
 
-        # Load Greenbone data
-        try:
-            with open(self.greenbone_file, 'r', encoding='utf-8') as f:
-                greenbone_data = json.load(f)
-            logger.info(f"Loaded Greenbone data: {len(greenbone_data.get('hosts', []))} hosts")
-        except FileNotFoundError:
-            logger.error(f"Greenbone file not found: {self.greenbone_file}")
-            return None, None
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in Greenbone file: {e}")
-            return None, None
+        self._validate_data_structure(nmap_data, "Nmap")
+        self._validate_data_structure(greenbone_data, "Greenbone")
 
         return nmap_data, greenbone_data
+
+    def _load_json_file(self, filepath: str, source_name: str) -> Optional[Dict]:
+        """Load and validate JSON file"""
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            logger.info(f"Loaded {source_name} data: {len(data.get('hosts', []))} hosts")
+            return data
+        except FileNotFoundError:
+            logger.error(f"{source_name} file not found: {filepath}")
+            return None
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in {source_name} file: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error loading {source_name} file: {e}")
+            return None
+
+    def _validate_data_structure(self, data: Dict, source_name: str) -> None:
+        """Validate data structure and IP addresses"""
+        if 'hosts' not in data or not isinstance(data['hosts'], list):
+            raise ValueError(f"{source_name} data missing 'hosts' array")
+
+        for idx, host in enumerate(data['hosts']):
+            if 'ip' not in host:
+                logger.warning(f"{source_name} host #{idx} missing IP address")
+                continue
+
+            if not self._validate_ip(host['ip']):
+                logger.warning(f"{source_name} invalid IP address: {host['ip']}")
 
     def normalize_severity(self, severity: str, cvss: float = None) -> str:
         """Normalize severity to standard scale: Critical/High/Medium/Low/Info"""
@@ -101,15 +140,23 @@ class DataMerger:
             else:
                 return "Info"
 
-    def extract_cve_ids(self, cve_string: str) -> List[str]:
+    def extract_cve_ids(self, cve_string: str = None, cve_list: List[str] = None) -> List[str]:
         """Extract CVE IDs from various formats"""
-        if not cve_string:
-            return []
+        cves = []
 
-        import re
-        cve_pattern = r'CVE-\d{4}-\d{4,7}'
-        cves = re.findall(cve_pattern, cve_string, re.IGNORECASE)
-        return [cve.upper() for cve in cves]
+        # Handle list input (already parsed CVE IDs from Greenbone)
+        if cve_list:
+            cves.extend([cve.upper() for cve in cve_list if cve])
+
+        # Handle string input (extract from text)
+        if cve_string:
+            import re
+            cve_pattern = r'CVE-\d{4}-\d{4,7}'
+            found_cves = re.findall(cve_pattern, cve_string, re.IGNORECASE)
+            cves.extend([cve.upper() for cve in found_cves])
+
+        # Return unique CVE IDs, sorted
+        return sorted(list(set(cves)))
 
     def is_duplicate_vulnerability(self, vuln1: Dict, vuln2: Dict) -> bool:
         """Check if two vulnerabilities are duplicates"""
@@ -142,11 +189,14 @@ class DataMerger:
         for nmap_vuln in nmap_vulns:
             # Normalize Nmap vulnerability format
             normalized_vuln = {
-                'title': nmap_vuln.get('title', nmap_vuln.get('id', 'Unknown')),
+                'title': nmap_vuln.get('title', nmap_vuln.get('id', nmap_vuln.get('script', 'Unknown'))),
                 'description': nmap_vuln.get('description', ''),
                 'severity': self.normalize_severity(nmap_vuln.get('severity', ''), nmap_vuln.get('cvss')),
                 'cvss': nmap_vuln.get('cvss'),
-                'cve_ids': self.extract_cve_ids(nmap_vuln.get('cve', '')),
+                'cve_ids': self.extract_cve_ids(
+                    cve_string=nmap_vuln.get('cve', ''),
+                    cve_list=nmap_vuln.get('cve_ids', [])
+                ),
                 'port': nmap_vuln.get('port'),
                 'protocol': nmap_vuln.get('protocol'),
                 'source': ['nmap'],
@@ -164,7 +214,10 @@ class DataMerger:
                 'description': gb_vuln.get('summary', ''),
                 'severity': self.normalize_severity(gb_vuln.get('severity', ''), gb_vuln.get('cvss')),
                 'cvss': gb_vuln.get('cvss'),
-                'cve_ids': self.extract_cve_ids(gb_vuln.get('cves', '')),
+                'cve_ids': self.extract_cve_ids(
+                    cve_string=gb_vuln.get('cves', ''),
+                    cve_list=gb_vuln.get('cve_ids', [])
+                ),
                 'port': gb_vuln.get('port'),
                 'protocol': gb_vuln.get('protocol'),
                 'source': ['greenbone'],
@@ -182,6 +235,11 @@ class DataMerger:
                     # Merge with existing vulnerability
                     existing_vuln['source'].append('greenbone')
                     existing_vuln['raw_data']['greenbone'] = gb_vuln
+
+                    # Merge CVE IDs
+                    existing_cves = set(existing_vuln.get('cve_ids', []))
+                    new_cves = set(normalized_gb_vuln.get('cve_ids', []))
+                    existing_vuln['cve_ids'] = sorted(list(existing_cves.union(new_cves)))
 
                     # Use higher CVSS score if available
                     if normalized_gb_vuln['cvss'] and (not existing_vuln['cvss'] or normalized_gb_vuln['cvss'] > existing_vuln['cvss']):
@@ -254,7 +312,7 @@ class DataMerger:
 
         return metrics
 
-    def create_minimal_host(self, ip: str) -> Dict:
+    def create_minimal_host(self, ip: str, source: str = 'greenbone') -> Dict:
         """Create minimal host entry for IPs only found in one source"""
         return {
             'ip': ip,
@@ -264,54 +322,138 @@ class DataMerger:
             'vulnerabilities': [],
             'os': None,
             'scripts': [],
-            'source': ['greenbone']  # Assuming it's from Greenbone if not in Nmap
+            'source': [source]
         }
 
-    def merge_data(self) -> Dict:
-        """Main method to merge Nmap and Greenbone data"""
+    def extract_ports_from_greenbone_host(self, gb_host: Dict) -> List[Dict]:
+        """Extract port information from Greenbone host data"""
+        ports = []
+        port_dict = {}  # Track ports by (port_num, protocol) to avoid duplicates
+
+        # Extract ports from the ports array (already structured)
+        for gb_port in gb_host.get('ports', []):
+            port_num = gb_port.get('port')
+            protocol = gb_port.get('protocol', 'tcp')
+
+            if port_num and (port_num, protocol) not in port_dict:
+                port_entry = {
+                    'port': port_num,
+                    'protocol': protocol,
+                    'state': gb_port.get('state', 'open'),
+                    'source': 'greenbone'
+                }
+
+                # Add service information if available
+                if gb_port.get('service'):
+                    port_entry['service'] = gb_port['service']
+                if gb_port.get('product'):
+                    port_entry['product'] = gb_port['product']
+                if gb_port.get('version'):
+                    port_entry['version'] = gb_port['version']
+
+                ports.append(port_entry)
+                port_dict[(port_num, protocol)] = port_entry
+
+        return ports
+
+    def find_or_create_port(self, host: Dict, port_num: int, protocol: str) -> Dict:
+        """Find existing port or create new one in host's ports array"""
+        for port in host.get('ports', []):
+            if port['port'] == port_num and port['protocol'] == protocol:
+                return port
+
+        # Create new port entry
+        new_port = {
+            'port': port_num,
+            'protocol': protocol,
+            'state': 'open',
+            'source': 'greenbone'
+        }
+        host['ports'].append(new_port)
+        return new_port
+
+    def merge_port_info(self, existing_port: Dict, new_info: Dict) -> None:
+        """Merge port information, keeping most detailed data"""
+        # Update service info if more detailed
+        for key in ['service', 'product', 'version']:
+            if key in new_info and new_info[key]:
+                if key not in existing_port or not existing_port[key]:
+                    existing_port[key] = new_info[key]
+
+        # Track multiple sources
+        if 'source' in new_info:
+            if 'source' not in existing_port:
+                existing_port['source'] = 'nmap'
+            if isinstance(existing_port['source'], str):
+                existing_port['source'] = [existing_port['source']]
+            if new_info['source'] not in existing_port['source']:
+                existing_port['source'].append(new_info['source'])
+
+    def merge_data(self) -> Optional[Dict]:
+        """
+        Main method to merge Nmap and Greenbone data.
+        CRITICAL: Ensures ALL IPs from BOTH sources are included in final output.
+        """
         logger.info("Starting data merge process...")
 
-        # Load data
         nmap_data, greenbone_data = self.load_data()
         if not nmap_data or not greenbone_data:
             logger.error("Failed to load required data files")
             return None
 
-        merged_hosts = {}
+        merged_hosts: Dict[str, Dict] = {}
 
-        # Start with Nmap data as base
         logger.info("Processing Nmap hosts...")
         for host in nmap_data.get('hosts', []):
             ip = host['ip']
-            merged_hosts[ip] = host.copy()
-            merged_hosts[ip]['vulnerabilities'] = host.get('vulnerabilities', [])
+            if not self._validate_ip(ip):
+                logger.warning(f"Skipping invalid IP from Nmap: {ip}")
+                continue
+
+            merged_hosts[ip] = self._deep_copy_host(host)
+            merged_hosts[ip]['vulnerabilities'] = list(host.get('vulnerabilities', []))
             merged_hosts[ip]['source'] = ['nmap']
+
+            for port in merged_hosts[ip].get('ports', []):
+                if 'source' not in port:
+                    port['source'] = 'nmap'
 
         logger.info(f"Base hosts from Nmap: {len(merged_hosts)}")
 
-        # Merge Greenbone data
         logger.info("Merging Greenbone data...")
         for gb_host in greenbone_data.get('hosts', []):
             ip = gb_host['ip']
+            if not self._validate_ip(ip):
+                logger.warning(f"Skipping invalid IP from Greenbone: {ip}")
+                continue
 
             if ip not in merged_hosts:
-                # Create new host entry
-                merged_hosts[ip] = self.create_minimal_host(ip)
+                logger.info(f"New IP from Greenbone (not in Nmap): {ip}")
+                merged_hosts[ip] = self.create_minimal_host(ip, source='greenbone')
                 merged_hosts[ip]['hostname'] = gb_host.get('hostname')
+                merged_hosts[ip]['os'] = gb_host.get('os')
             else:
-                # Add Greenbone as source
                 if 'greenbone' not in merged_hosts[ip].get('source', []):
                     merged_hosts[ip]['source'].append('greenbone')
 
-                # Update hostname if not present
                 if not merged_hosts[ip].get('hostname') and gb_host.get('hostname'):
                     merged_hosts[ip]['hostname'] = gb_host.get('hostname')
 
-            # Merge vulnerabilities
+                if not merged_hosts[ip].get('os') and gb_host.get('os'):
+                    merged_hosts[ip]['os'] = gb_host.get('os')
+
+            gb_ports = self.extract_ports_from_greenbone_host(gb_host)
+            for gb_port in gb_ports:
+                existing_port = self.find_or_create_port(
+                    merged_hosts[ip],
+                    gb_port['port'],
+                    gb_port['protocol']
+                )
+                self.merge_port_info(existing_port, gb_port)
+
             nmap_vulns = merged_hosts[ip].get('vulnerabilities', [])
             gb_vulns = []
 
-            # Add port-specific vulnerabilities
             for port in gb_host.get('ports', []):
                 for vuln in port.get('vulnerabilities', []):
                     vuln_copy = vuln.copy()
@@ -319,21 +461,31 @@ class DataMerger:
                     vuln_copy['protocol'] = port['protocol']
                     gb_vulns.append(vuln_copy)
 
-            # Add general vulnerabilities
             for vuln in gb_host.get('general_vulnerabilities', []):
                 gb_vulns.append(vuln)
 
-            # Merge vulnerability lists
             merged_hosts[ip]['vulnerabilities'] = self.merge_vulnerabilities(nmap_vulns, gb_vulns)
 
         logger.info(f"Total hosts after merge: {len(merged_hosts)}")
 
-        # Calculate metrics for each host
-        logger.info("Calculating host metrics...")
         for ip, host in merged_hosts.items():
             host['metrics'] = self.calculate_host_metrics(host)
 
-        # Create master data structure
+        nmap_ips = {h['ip'] for h in nmap_data.get('hosts', [])}
+        gb_ips = {h['ip'] for h in greenbone_data.get('hosts', [])}
+        merged_ips = set(merged_hosts.keys())
+
+        nmap_only = nmap_ips - gb_ips
+        gb_only = gb_ips - nmap_ips
+        both = nmap_ips & gb_ips
+
+        logger.info(f"IP distribution: Nmap-only={len(nmap_only)}, Greenbone-only={len(gb_only)}, Both={len(both)}")
+
+        if nmap_ips - merged_ips:
+            logger.error(f"CRITICAL: Missing Nmap IPs: {nmap_ips - merged_ips}")
+        if gb_ips - merged_ips:
+            logger.error(f"CRITICAL: Missing Greenbone IPs: {gb_ips - merged_ips}")
+
         master_data = {
             'metadata': {
                 'generated_at': datetime.now().isoformat(),
@@ -341,21 +493,28 @@ class DataMerger:
                 'nmap_hosts': len([h for h in merged_hosts.values() if 'nmap' in h.get('source', [])]),
                 'greenbone_hosts': len([h for h in merged_hosts.values() if 'greenbone' in h.get('source', [])]),
                 'both_sources': len([h for h in merged_hosts.values() if len(h.get('source', [])) > 1]),
-                'version': '1.0'
+                'nmap_only_count': len(nmap_only),
+                'greenbone_only_count': len(gb_only),
+                'version': '2.0'
             },
-            'hosts': list(merged_hosts.values())
+            'hosts': sorted(merged_hosts.values(), key=lambda h: h['ip'])
         }
 
-        # Calculate aggregate statistics
         total_vulns = sum(len(h.get('vulnerabilities', [])) for h in merged_hosts.values())
         total_ports = sum(h.get('metrics', {}).get('total_ports', 0) for h in merged_hosts.values())
 
         master_data['metadata']['total_vulnerabilities'] = total_vulns
         master_data['metadata']['total_ports'] = total_ports
 
-        logger.info(f"Merge complete: {len(merged_hosts)} hosts, {total_vulns} vulnerabilities, {total_ports} open ports")
+        logger.info(f"Merge complete: {len(merged_hosts)} hosts, {total_vulns} vulns, {total_ports} ports")
 
         return master_data
+
+    @staticmethod
+    def _deep_copy_host(host: Dict) -> Dict:
+        """Create deep copy of host data to prevent reference issues"""
+        import copy
+        return copy.deepcopy(host)
 
     def export_json(self, data: Dict) -> bool:
         """Export merged data to JSON"""
@@ -378,8 +537,23 @@ class DataMerger:
             logger.error(f"Failed to export JSON: {e}")
             return False
 
+    @staticmethod
+    def _sanitize_csv_field(value: Any) -> str:
+        """Sanitize CSV field to prevent CSV injection attacks"""
+        if value is None:
+            return ''
+
+        str_value = str(value)
+
+        if str_value and str_value[0] in ['=', '+', '-', '@', '\t', '\r']:
+            str_value = "'" + str_value
+
+        str_value = str_value.replace('\n', ' ').replace('\r', ' ')
+
+        return str_value
+
     def export_csv(self, data: Dict) -> bool:
-        """Export merged data to flat CSV format"""
+        """Export merged data to flat CSV format with injection protection"""
         try:
             fieldnames = [
                 'IP', 'Hostname', 'Status', 'OS', 'OS_Accuracy',
@@ -390,7 +564,7 @@ class DataMerger:
             ]
 
             with open(self.output_csv, 'w', newline='', encoding='utf-8-sig') as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
                 writer.writeheader()
 
                 for host in data.get('hosts', []):
@@ -399,10 +573,10 @@ class DataMerger:
                     services = metrics.get('services_list', [])
 
                     row = {
-                        'IP': host.get('ip', ''),
-                        'Hostname': host.get('hostname', ''),
-                        'Status': host.get('status', ''),
-                        'OS': host.get('os', {}).get('name', '') if host.get('os') else '',
+                        'IP': self._sanitize_csv_field(host.get('ip', '')),
+                        'Hostname': self._sanitize_csv_field(host.get('hostname', '')),
+                        'Status': self._sanitize_csv_field(host.get('status', '')),
+                        'OS': self._sanitize_csv_field(host.get('os', {}).get('name', '') if host.get('os') else ''),
                         'OS_Accuracy': host.get('os', {}).get('accuracy', '') if host.get('os') else '',
                         'Total_Ports': metrics.get('total_ports', 0),
                         'TCP_Ports': metrics.get('tcp_ports', 0),
@@ -418,16 +592,19 @@ class DataMerger:
                         'Top_CVE_2': cve_list[1] if len(cve_list) > 1 else '',
                         'Top_CVE_3': cve_list[2] if len(cve_list) > 2 else '',
                         'Services_Count': metrics.get('services_count', 0),
-                        'Services_Summary': '; '.join(services[:10]),  # Limit to first 10 services
+                        'Services_Summary': self._sanitize_csv_field('; '.join(services[:10])),
                         'Sources': '; '.join(host.get('source', []))
                     }
                     writer.writerow(row)
 
-            logger.info(f"CSV exported: {self.output_csv}")
+            file_size_kb = os.path.getsize(self.output_csv) / 1024
+            logger.info(f"CSV exported: {self.output_csv} ({file_size_kb:.2f} KB)")
             return True
 
         except Exception as e:
             logger.error(f"Failed to export CSV: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def run(self) -> bool:

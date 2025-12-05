@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
 Greenbone CSV to JSON Converter - Converte report CSV Greenbone in formato JSON unificato
-Autore: Script generato per vulnerability assessment
+
+Security-hardened version with input validation and sanitization
+Author: Security Optimizer & Original Script
+Version: 2.0
 Utilizzo: python3 greenbone_unifier.py [input_dir] [output.json]
 Default: Processa tutti i file .csv da input/greenbone/ -> output/results/greenbone_unified.json
 """
@@ -10,6 +13,7 @@ import csv
 import json
 import sys
 import re
+import os
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
@@ -182,26 +186,48 @@ class GreenboneUnifier:
         host['ports'].append(new_port)
         return new_port
     
+    @staticmethod
+    def _sanitize_string(value: str, max_length: int = 5000) -> str:
+        """Sanitize string input to prevent injection and limit size"""
+        if not value:
+            return ""
+
+        value = value[:max_length]
+
+        value = value.replace('\x00', '')
+
+        dangerous_patterns = [
+            r'<script[^>]*>.*?</script>',
+            r'javascript:',
+            r'on\w+\s*=',
+        ]
+        for pattern in dangerous_patterns:
+            value = re.sub(pattern, '', value, flags=re.IGNORECASE)
+
+        return value.strip()
+
     def parse_csv(self, csv_file: Path) -> None:
-        """Parse del file CSV Greenbone"""
+        """Parse del file CSV Greenbone con validazione sicurezza"""
         print(f"[INFO] Parsing CSV: {csv_file.name}")
+
+        if csv_file.stat().st_size > 100 * 1024 * 1024:
+            print(f"[ERROR] File troppo grande (>100MB): {csv_file.name}")
+            return
 
         try:
             with open(csv_file, 'r', encoding='utf-8', errors='ignore') as f:
-                # Prova diversi delimitatori comuni
                 sample = f.read(1024)
                 f.seek(0)
-                
-                # Rileva delimitatore
+
                 sniffer = csv.Sniffer()
                 try:
                     dialect = sniffer.sniff(sample)
                     delimiter = dialect.delimiter
                 except:
-                    delimiter = ','  # Fallback
-                
+                    delimiter = ','
+
                 print(f"[INFO] Delimitatore rilevato: '{delimiter}'")
-                
+
                 reader = csv.DictReader(f, delimiter=delimiter)
                 
                 row_count = 0
