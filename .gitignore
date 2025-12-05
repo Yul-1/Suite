@@ -3,6 +3,9 @@
 *.csv
 *.json
 
+# Claude Code configuration
+.claude/
+
 # Output directory - ignore all contents but keep structure
 output/analysis/*
 !output/analysis/.gitkeep
